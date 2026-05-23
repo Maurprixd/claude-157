@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.job_cache.json
+outputs/
+resumes/
+job_scraper/
