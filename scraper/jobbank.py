@@ -14,10 +14,17 @@ BASE_URL = "https://www.jobbank.gc.ca"
 SEARCH_QUERIES = [
     "industrial designer",
     "product designer",
-    "junior designer",
     "design engineer product",
     "medical device designer",
-    "wearable device",
+    "product development",
+]
+
+# Title must contain at least one of these words to be worth fetching a description for.
+# Filters out retail/HVAC/software noise before making expensive description requests.
+TITLE_KEYWORDS = [
+    "designer", "design", "product", "industrial", "mechanical",
+    "engineer", "cad", "solidworks", "prototype", "medical device",
+    "wearable", "packaging", "furniture", "hardware",
 ]
 
 SEARCH_URL_TEMPLATE = (
@@ -121,6 +128,12 @@ def scrape(max_pages: int = 3) -> list[Job]:
             for rj in raw_jobs:
                 if rj["job_id"] in seen_ids:
                     continue
+
+                # Pre-filter by title to avoid wasting description requests on noise
+                title_lower = rj["title"].lower()
+                if not any(kw in title_lower for kw in TITLE_KEYWORDS):
+                    continue
+
                 seen_ids.add(rj["job_id"])
 
                 desc = _fetch_job_description(rj["raw_id"], client)
