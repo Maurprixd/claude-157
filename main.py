@@ -169,6 +169,29 @@ def scrape(sources: str, min_score: int, no_verify: bool, no_cache: bool):
     else:
         qualified = [j for j in unique_jobs if (j.match_score or 0) >= min_score]
 
+    # --- Filter against Notion tracker (skip already-applied companies) ---
+    if os.getenv("NOTION_TOKEN") and qualified:
+        try:
+            print("\n[notion] Checking tracker for already-applied jobs...")
+            from notion.logger import NotionLogger
+            notion = NotionLogger()
+            applied_companies, applied_job_ids = notion.get_applied_entries()
+            before = len(qualified)
+            filtered = []
+            for job in qualified:
+                if job.job_id in applied_job_ids:
+                    print(f"  [notion] Skip (applied): {job.title} @ {job.company}")
+                    continue
+                if job.company.lower().strip() in applied_companies:
+                    print(f"  [notion] Skip (company already applied): {job.company}")
+                    continue
+                filtered.append(job)
+            if before > len(filtered):
+                print(f"  [notion] Removed {before - len(filtered)} already-applied job(s)")
+            qualified = filtered
+        except Exception as e:
+            print(f"  [notion] Could not check tracker (skipping filter): {e}")
+
     # --- Verify ---
     if not no_verify and qualified:
         print(f"\n[verifier] Checking {len(qualified)} jobs are still active...")

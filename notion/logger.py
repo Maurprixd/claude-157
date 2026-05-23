@@ -80,6 +80,57 @@ class NotionLogger:
         ).raise_for_status()
         print(f"  [notion] Marked as Applied: {job.title} @ {job.company}")
 
+    def get_applied_entries(self) -> tuple[set[str], set[str]]:
+        """
+        Fetch all Notion entries with Status Applied/Interviewing/Offer/Rejected.
+        Returns (company_names_lowercase, job_ids) — used to filter scraper output.
+        """
+        applied_companies: set[str] = set()
+        applied_job_ids: set[str] = set()
+
+        payload: dict = {
+            "filter": {
+                "or": [
+                    {"property": "Status", "select": {"equals": "Applied"}},
+                    {"property": "Status", "select": {"equals": "Interviewing"}},
+                    {"property": "Status", "select": {"equals": "Offer"}},
+                    {"property": "Status", "select": {"equals": "Rejected"}},
+                ]
+            },
+            "page_size": 100,
+        }
+
+        try:
+            has_more = True
+            cursor: Optional[str] = None
+            while has_more:
+                if cursor:
+                    payload["start_cursor"] = cursor
+                resp = requests.post(
+                    f"{NOTION_API_BASE}/databases/{self.database_id}/query",
+                    headers=self.headers,
+                    json=payload,
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                for result in data.get("results", []):
+                    props = result.get("properties", {})
+                    company_texts = props.get("Company", {}).get("rich_text", [])
+                    if company_texts:
+                        applied_companies.add(company_texts[0]["text"]["content"].lower().strip())
+                    job_id_texts = props.get("Job ID", {}).get("rich_text", [])
+                    if job_id_texts:
+                        jid = job_id_texts[0]["text"]["content"].strip()
+                        if jid:
+                            applied_job_ids.add(jid)
+                has_more = data.get("has_more", False)
+                cursor = data.get("next_cursor")
+        except Exception as e:
+            print(f"  [notion] Could not fetch applied entries: {e}")
+
+        return applied_companies, applied_job_ids
+
     def _find_existing(self, job_id: str) -> Optional[str]:
         payload = {
             "filter": {

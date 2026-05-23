@@ -139,6 +139,8 @@ CANDIDATE_PROFILE = {
         "10 years", "8 years", "7 years",
     ],
 
-    # Minimum match score to surface in results (strict)
-    "min_match_score": 70,
+    # Minimum match score to surface in results.
+    # 50 is realistic for the current Job Bank market — very few listings score 70+.
+    # Override per-run with: python main.py scrape --min-score 70
+    "min_match_score": 50,
 }
