@@ -5,6 +5,7 @@ Uses your Pro subscription — no separate API key needed.
 import shutil
 import subprocess
 import sys
+import time
 
 
 def check_claude_cli() -> None:
@@ -19,21 +20,34 @@ def check_claude_cli() -> None:
         sys.exit(1)
 
 
-def call_claude(prompt: str, timeout: int = 120) -> str:
+def call_claude(prompt: str, timeout: int = 120, retries: int = 3) -> str:
     """
     Send a prompt to the claude CLI and return the response text.
     Uses your Claude Pro subscription via the locally installed CLI.
+    Retries up to `retries` times with exponential backoff on failure.
     """
     check_claude_cli()
-    result = subprocess.run(
-        ["claude", "-p", prompt],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"Claude CLI returned error:\n{result.stderr.strip()}")
-    return result.stdout.strip()
+    last_error = None
+    for attempt in range(retries):
+        try:
+            result = subprocess.run(
+                ["claude", "-p", prompt],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+            last_error = result.stderr.strip() or f"exit code {result.returncode}"
+        except subprocess.TimeoutExpired:
+            last_error = "timeout"
+
+        if attempt < retries - 1:
+            wait = 10 * (2 ** attempt)  # 10s, 20s, 40s
+            print(f"  [claude_cli] Retrying in {wait}s (attempt {attempt + 1}/{retries})...")
+            time.sleep(wait)
+
+    raise RuntimeError(f"Claude CLI failed after {retries} attempts: {last_error}")
 
 
 def call_claude_streaming(prompt: str, timeout: int = 120) -> str:
