@@ -1,22 +1,14 @@
 """
 Claude-powered job matching.
-Uses claude-haiku-4-5 for fast batch scoring with prompt caching on profile.
+Uses the local claude CLI (your Pro subscription) — no API key needed.
 """
 import json
-import os
-from typing import Optional
 
-import anthropic
-
+from ai.claude_cli import call_claude, check_claude_cli
 from profile.mauricio import CANDIDATE_PROFILE
 from scraper.models import Job
 
 MIN_SCORE = CANDIDATE_PROFILE["min_match_score"]
-
-SYSTEM_PROMPT = """You are a ruthlessly honest career counselor evaluating job postings for a specific candidate.
-Score each job 1-100 for fit. Be very strict — only score 70+ when there is genuine strong alignment.
-Most jobs should score 30-65. Only genuinely great fits get 70+.
-Respond ONLY with valid JSON matching the requested schema. No extra text."""
 
 _CANDIDATE_CONTEXT = f"""
 ## Candidate: {CANDIDATE_PROFILE['name']}
@@ -57,93 +49,66 @@ Research: User research, competitive benchmarking, ergonomic analysis
 {', '.join(CANDIDATE_PROFILE['languages'])}
 """
 
-SCORE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "score": {"type": "integer", "minimum": 1, "maximum": 100},
-        "reasoning": {"type": "string"},
-        "odds_of_getting": {
-            "type": "string",
-            "description": "Realistic % range + brief explanation, e.g. '25-35% — strong technical match but wants 2 yrs exp'"
-        },
-        "key_strengths": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "Top 2-3 reasons candidate fits this role"
-        },
-        "key_gaps": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "Top 1-3 gaps or concerns"
-        },
-    },
-    "required": ["score", "reasoning", "odds_of_getting", "key_strengths", "key_gaps"],
-    "additionalProperties": False,
-}
 
+def _build_scoring_prompt(job: Job) -> str:
+    return f"""You are a ruthlessly honest career counselor evaluating a job posting for a specific candidate.
+Score the job 1-100 for fit. Be very strict — only score 70+ for genuine strong alignment.
+Most jobs should score 30-65. Respond ONLY with valid JSON. No extra text before or after the JSON.
 
-def _render_job_prompt(job: Job) -> str:
-    return f"""## Job to Evaluate
+{_CANDIDATE_CONTEXT}
+
+---
+
+## Job to Evaluate
 
 Title: {job.title}
 Company: {job.company}
 Location: {job.location}
-Source: {job.source.value}
 Salary: {job.salary or 'Not specified'}
 Posted: {job.posted_date or 'Unknown'}
 
-### Full Job Description:
+### Job Description:
 {job.description[:3500]}
 
 ---
 
-Score this job for the candidate. Consider strictly:
-1. Seniority level — penalize heavily if 3+ years required (candidate has ~1.5 yrs)
+Score this job strictly. Consider:
+1. Seniority — penalize heavily if 3+ years required (candidate has ~1.5 yrs)
 2. Required tools — must overlap with SolidWorks, KeyShot, Rhino, 3D printing, DFM
 3. Location — Toronto/ON preferred; remote Canada ok; other provinces ok but note it
-4. Sector fit — medical devices, wearables, consumer electronics = strong bonus
-5. Role type — must involve physical product design (not pure graphic/UX/fashion)
+4. Sector — medical devices, wearables, consumer electronics = strong bonus
+5. Role type — must involve physical product design (not pure graphic/UX/fashion/interior)
 6. P.Eng or professional license required → penalize significantly (candidate is still a student)
 
-Respond with JSON only."""
+Respond with this exact JSON (no markdown, no ```):
+{{
+  "score": <integer 1-100>,
+  "reasoning": "<one paragraph explaining the score>",
+  "odds_of_getting": "<realistic % range + brief reason, e.g. '25-35% — strong technical match but wants 2 yrs exp'>",
+  "key_strengths": ["<strength 1>", "<strength 2>", "<strength 3>"],
+  "key_gaps": ["<gap 1>", "<gap 2>"]
+}}"""
 
 
-def score_job(job: Job, client: anthropic.Anthropic) -> Job:
-    """Score a single job against Mauricio's profile. Returns the job with scores filled in."""
+def score_job(job: Job) -> Job:
+    """Score a single job. Returns the job with scores filled in."""
     try:
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=512,
-            system=SYSTEM_PROMPT,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": _CANDIDATE_CONTEXT,
-                            "cache_control": {"type": "ephemeral"},
-                        }
-                    ],
-                },
-                {
-                    "role": "assistant",
-                    "content": "Understood. I have reviewed the candidate profile. Please provide the job posting to evaluate.",
-                },
-                {
-                    "role": "user",
-                    "content": _render_job_prompt(job),
-                },
-            ],
-        )
+        raw = call_claude(_build_scoring_prompt(job))
 
-        raw = response.content[0].text.strip()
-        if raw.startswith("```"):
+        # Strip markdown code fences if present
+        if "```" in raw:
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
-        data = json.loads(raw)
+            raw = raw.split("```")[0]
 
+        # Find the JSON object in case there's stray text
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        if start != -1 and end > start:
+            raw = raw[start:end]
+
+        data = json.loads(raw)
         job.match_score = int(data.get("score", 0))
         job.match_reasoning = data.get("reasoning", "")
         job.odds_of_getting = data.get("odds_of_getting", "")
@@ -157,21 +122,14 @@ def score_job(job: Job, client: anthropic.Anthropic) -> Job:
     return job
 
 
-def score_jobs_batch(
-    jobs: list[Job],
-    min_score: int = MIN_SCORE,
-) -> list[Job]:
-    """Score all jobs, return those meeting min_score. Uses Haiku with cached profile."""
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise ValueError("ANTHROPIC_API_KEY not set in environment. Add it to your .env file.")
-
-    client = anthropic.Anthropic(api_key=api_key)
+def score_jobs_batch(jobs: list[Job], min_score: int = MIN_SCORE) -> list[Job]:
+    """Score all jobs via claude CLI, return those meeting min_score."""
+    check_claude_cli()
     scored = []
 
     for i, job in enumerate(jobs):
         print(f"  [matcher] Scoring {i+1}/{len(jobs)}: {job.title} @ {job.company}")
-        score_job(job, client)
+        score_job(job)
         print(f"    → Score: {job.match_score}/100")
         scored.append(job)
 

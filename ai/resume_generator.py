@@ -1,25 +1,13 @@
 """
 Claude-powered resume tailoring.
-Uses claude-haiku-4-5 to rewrite bullets and emphasis for a specific job.
+Uses the local claude CLI (your Pro subscription) — no API key needed.
 """
-import json
-import os
 import copy
+import json
 
-import anthropic
-
+from ai.claude_cli import call_claude, check_claude_cli
 from profile.mauricio import CANDIDATE_PROFILE
 from scraper.models import Job
-
-TAILOR_SYSTEM = """You are an expert resume writer for industrial designers.
-Your task: tailor an existing resume for a specific job posting.
-
-STRICT RULES:
-- Never fabricate, invent, or exaggerate experience or skills
-- Only reframe, reorder, and re-emphasize information that already exists
-- Keep every bullet truthful and specific
-- Adjust word choice to match the job's terminology when accurate
-- Respond ONLY with valid JSON — no extra text"""
 
 
 def _tailor_prompt(job: Job, profile: dict) -> str:
@@ -33,7 +21,17 @@ def _tailor_prompt(job: Job, profile: dict) -> str:
         f"  {k}: {', '.join(v)}" for k, v in profile["skills"].items()
     )
 
-    return f"""## Target Job
+    return f"""You are an expert resume writer for industrial designers.
+Tailor the candidate's resume for the specific job below.
+
+STRICT RULES:
+- Never fabricate, invent, or exaggerate experience or skills
+- Only reframe, reorder, and re-emphasize information that already exists
+- Keep every bullet truthful and specific
+- Adjust word choice to match the job's terminology when accurate
+- Respond ONLY with valid JSON — no markdown, no extra text
+
+## Target Job
 Title: {job.title}
 Company: {job.company}
 Location: {job.location}
@@ -57,53 +55,47 @@ Salary: {job.salary or 'Not specified'}
 
 ---
 
-## Your Task
-Return a JSON object with this exact structure — tailored for the job above:
-
+Return this exact JSON structure (no markdown fences):
 {{
-  "summary": "2-3 sentence summary targeting THIS specific role. Be specific.",
+  "summary": "<2-3 sentence summary targeting THIS specific role and company>",
   "experience": [
     {{
-      "title": "same title",
-      "company": "same company",
-      "location": "same location",
-      "dates": "same dates",
-      "bullets": ["rewritten bullet 1", "rewritten bullet 2", "..."]
+      "title": "<same title as original>",
+      "company": "<same company>",
+      "location": "<same location>",
+      "dates": "<same dates>",
+      "bullets": ["<rewritten bullet 1>", "<rewritten bullet 2>", "..."]
     }}
   ],
-  "skills_emphasis": ["skill1", "skill2", "skill3", "skill4", "skill5"],
-  "tailoring_notes": "Brief note on what you emphasized and why"
+  "skills_emphasis": ["<skill1>", "<skill2>", "<skill3>", "<skill4>", "<skill5>"],
+  "tailoring_notes": "<brief note on what you emphasized and why>"
 }}
 
 Rules:
 - Rewrite up to 3 bullets per role to better match the job
 - Keep bullets factually accurate to the original
 - skills_emphasis: list the 5 most relevant skills for THIS job (from existing skills only)
-- summary: mention the company name and role if natural"""
+- summary: naturally mention the role or company if it fits"""
 
 
 def generate_tailored_content(job: Job) -> dict:
-    """Returns a tailored profile dict for PDF generation."""
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise ValueError("ANTHROPIC_API_KEY not set.")
-
-    client = anthropic.Anthropic(api_key=api_key)
-
+    """Returns a tailored profile dict ready for PDF generation."""
+    check_claude_cli()
     print(f"  [resume_gen] Tailoring resume for: {job.title} @ {job.company}")
 
-    response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=1500,
-        system=TAILOR_SYSTEM,
-        messages=[{"role": "user", "content": _tailor_prompt(job, CANDIDATE_PROFILE)}],
-    )
+    raw = call_claude(_tailor_prompt(job, CANDIDATE_PROFILE), timeout=180)
 
-    raw = response.content[0].text.strip()
-    if raw.startswith("```"):
+    # Strip markdown fences if present
+    if "```" in raw:
         raw = raw.split("```")[1]
         if raw.startswith("json"):
             raw = raw[4:]
+        raw = raw.split("```")[0]
+
+    start = raw.find("{")
+    end = raw.rfind("}") + 1
+    if start != -1 and end > start:
+        raw = raw[start:end]
 
     data = json.loads(raw)
 

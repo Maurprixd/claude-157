@@ -1,27 +1,26 @@
 """
 Claude-powered cover letter generator.
-Streams output so you see it as it's written.
+Uses the local claude CLI (your Pro subscription) — no API key needed.
+Streams output to terminal so you see it as it writes.
 """
-import os
 import pathlib
 import time
 
-import anthropic
-
+from ai.claude_cli import call_claude_streaming, check_claude_cli
 from profile.mauricio import CANDIDATE_PROFILE
 from scraper.models import Job
-
-COVER_SYSTEM = """You write compelling, specific cover letters for industrial designers.
-Never use generic phrases like "I am excited to apply" or "I am a hard worker".
-Be specific, confident, and brief. Target: 300-400 words.
-Write in a direct, professional tone that reflects design-industry culture."""
 
 
 def _cover_prompt(job: Job, profile: dict) -> str:
     exp = profile["experience"][0]
     bullets = "\n".join(f"  - {b}" for b in exp["bullets"][:3])
 
-    return f"""Write a cover letter for {profile['name']} applying to:
+    return f"""You write compelling, specific cover letters for industrial designers.
+Never use generic phrases like "I am excited to apply" or "I am a hard worker".
+Be specific, confident, and brief. Target: 300-400 words.
+Write in a direct, professional tone that reflects design-industry culture.
+
+Write a cover letter for {profile['name']} applying to:
 
 Role: {job.title}
 Company: {job.company}
@@ -40,7 +39,7 @@ Candidate background:
 - Experience at VIV66 doing technical construction specs and manufacturing feasibility
 - Bilingual: English (Fluent), Spanish (Native), French (basic)
 
-Most relevant recent bullets:
+Most relevant recent experience:
 {bullets}
 
 ---
@@ -58,32 +57,19 @@ Do NOT use:
 - "I am passionate about design"
 - Any cliché opener
 
-Address it to "Hiring Manager" unless the job description mentions a name.
-Include Mauricio's contact: {profile['email']} | {profile['phone']} | {profile['website']}"""
+Address to "Hiring Manager" unless the job description mentions a specific name.
+Include contact at the end: {profile['email']} | {profile['phone']} | {profile['website']}"""
 
 
 def generate_cover_letter(job: Job) -> str:
-    """Generate and stream a cover letter. Saves to outputs/. Returns file path."""
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise ValueError("ANTHROPIC_API_KEY not set.")
-
-    client = anthropic.Anthropic(api_key=api_key)
+    """Stream a cover letter to the terminal and save it. Returns the file path."""
+    check_claude_cli()
 
     print(f"\n{'='*60}")
     print(f"Cover Letter: {job.title} @ {job.company}")
     print(f"{'='*60}\n")
 
-    full_text = ""
-    with client.messages.stream(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=800,
-        system=COVER_SYSTEM,
-        messages=[{"role": "user", "content": _cover_prompt(job, CANDIDATE_PROFILE)}],
-    ) as stream:
-        for text in stream.text_stream:
-            print(text, end="", flush=True)
-            full_text += text
+    full_text = call_claude_streaming(_cover_prompt(job, CANDIDATE_PROFILE))
 
     print(f"\n{'='*60}\n")
 

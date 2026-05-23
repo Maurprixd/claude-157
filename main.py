@@ -163,13 +163,7 @@ def scrape(sources: str, min_score: int, no_verify: bool, no_cache: bool):
 
     # --- AI Matching ---
     if to_score:
-        if not os.getenv("ANTHROPIC_API_KEY"):
-            print("\n[ERROR] ANTHROPIC_API_KEY not set.")
-            print("  1. Get your key at https://console.anthropic.com")
-            print("  2. Copy .env.example to .env and fill in your key")
-            sys.exit(1)
-
-        print(f"\n[matcher] Scoring {len(to_score)} jobs with Claude AI...")
+        print(f"\n[matcher] Scoring {len(to_score)} jobs with Claude AI (via your Pro subscription)...")
         from ai.matcher import score_jobs_batch
         qualified = score_jobs_batch(to_score, min_score=min_score)
     else:
@@ -223,10 +217,6 @@ def resume(job_id: str, output_dir: str):
         print(f"Job '{job_id}' not found in cache. Run scrape first.")
         sys.exit(1)
 
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        print("[ERROR] ANTHROPIC_API_KEY not set. Add it to your .env file.")
-        sys.exit(1)
-
     print(f"\nGenerating tailored resume for: {job.title} @ {job.company}")
 
     from ai.resume_generator import generate_tailored_content
@@ -252,10 +242,6 @@ def cover(job_id: str, output_dir: str):
     job = cache.get(job_id)
     if not job:
         print(f"Job '{job_id}' not found in cache. Run scrape first.")
-        sys.exit(1)
-
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        print("[ERROR] ANTHROPIC_API_KEY not set. Add it to your .env file.")
         sys.exit(1)
 
     from ai.cover_letter import generate_cover_letter
