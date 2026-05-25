@@ -10,62 +10,59 @@ from scraper.models import Job
 
 MIN_SCORE = CANDIDATE_PROFILE["min_match_score"]
 
-_CANDIDATE_CONTEXT = f"""
-## Candidate: {CANDIDATE_PROFILE['name']}
-Location: {CANDIDATE_PROFILE['location']} ({CANDIDATE_PROFILE['relocation_note']})
-Portfolio: mauricio-mena.com | behance.net/gallery/217417729/Portfolio
-Languages: English (Fluent), Spanish (Native), French (Basic — actively studying)
 
-### Education
-{CANDIDATE_PROFILE['education'][0]['degree']} — {CANDIDATE_PROFILE['education'][0]['school']}
-Expected graduation: {CANDIDATE_PROFILE['education'][0]['graduation']}
-Relevant courses: {CANDIDATE_PROFILE['education'][0]['courses']}
+def _build_candidate_context() -> str:
+    """Build the candidate context block from the live profile data."""
+    p = CANDIDATE_PROFILE
+    edu = p["education"][0]
 
-### Experience (~1.5 years professional + 3 years total design practice)
+    # Experience section — reads live bullets from profile/mauricio.py
+    exp_lines = []
+    for e in p["experience"]:
+        exp_lines.append(f"\n**{e['title']} — {e['company']}** ({e['dates']})")
+        for b in e["bullets"]:
+            exp_lines.append(f"- {b}")
 
-**Lead Industrial Designer — WIMTACH / Centennial College** (Sept 2024 – Present)
-- Lead designer on BuddhaCalm: a patent-pending wearable stress-relief device (patent application
-  filed Feb 2026; device selected for WIMTACH industry showcase). Full ownership from first sketch
-  to production-ready prototype — not a class project, a real funded R&D program.
-- Generates 15-20+ distinct concepts per design sprint; iterates across mechanism variations,
-  enclosure geometry, CMF, and ergonomic form factors before converging on a direction.
-- Built multi-fidelity prototypes: foam and cardboard mockups for early ergonomic validation,
-  iterative FDM prints (Bambu Lab P1S) for mechanism testing, final assemblies integrating rigid
-  housing, flexible contact surfaces, and pogo-pin charging hardware.
-- Created SolidWorks assemblies with complex constraint relationships; produced DFM-ready parts
-  and technical drawings for external manufacturing partners.
-- Led user research sessions and ergonomic testing with target users; synthesized feedback into
-  documented design changes across 4 prototype iterations — experience equivalent to focus-group
-  facilitation and usability validation.
-- Produced KeyShot photorealistic renders and Adobe Suite stakeholder decks for client-facing
-  design reviews. Visible portfolio of this work at mauricio-mena.com.
+    # Skills section
+    skill_lines = []
+    for k, v in p["skills"].items():
+        skill_lines.append(f"{k.replace('_', ' ')}: {', '.join(v)}")
 
-**Product & Technical Designer — VIV66** (2023 – 2024)
-- Developed multi-material technical construction specifications for soft goods (apparel) product
-  lines — documenting stitch types, fabric callouts, hardware assembly, and tolerance requirements.
-  This is direct soft goods / flexible materials design experience.
-- Collaborated with production teams on fit refinement and material tolerance validation across a
-  5-month development cycle; iterating samples for comfort, durability, and manufacturability.
-- Produced BOM documentation and shop drawings for manufacturing handoff.
+    # Sectors
+    sector_lines = [f"- {s}" for s in p["preferred_sectors"]]
 
-### Hard Skills
-CAD: SolidWorks (Expert — assemblies, parts, drawings, DFM-compliant design), Rhino 3D (surface modelling)
-Rendering: KeyShot (photorealistic renders, lifestyle visuals, client presentations)
-Prototyping: FDM 3D printing (Bambu Lab P1S, Prusa XL), foam mockups, multi-material assemblies
-Engineering: Design for Manufacturing (DFM), BOM preparation, technical and assembly drawings
-Concept Design: Hand sketching, digital ideation, CMF exploration, mood boards, benchmarking
-Software: Adobe Photoshop, Illustrator, InDesign
+    return "\n".join([
+        f"## Candidate: {p['name']}",
+        f"Location: {p['location']} ({p['relocation_note']})",
+        f"Portfolio: {p['website']} | {p['portfolio_behance']}",
+        f"Languages: {' | '.join(p['languages'])}",
+        "",
+        "### Context (read before scoring)",
+        p["experience_notes"],
+        "",
+        "### Education",
+        f"{edu['degree']} — {edu['school']}",
+        f"Expected graduation: {edu['graduation']}",
+        f"Relevant courses: {edu['courses']}",
+        "",
+        "### Experience",
+        "\n".join(exp_lines),
+        "",
+        "### Skills",
+        "\n".join(skill_lines),
+        "",
+        "### Target Roles",
+        ", ".join(p["target_roles"]),
+        "",
+        "### Preferred Sectors (boost score for these)",
+        "\n".join(sector_lines),
+        "",
+        "### Avoid (penalize if job is primarily in these areas)",
+        ", ".join(p["avoid_sectors"]),
+    ])
 
-### Soft Skills
-High-volume concept generation | Cross-functional team coordination | User research & synthesis
-Fast iteration under tight timelines | Bilingual client communication (English + Spanish)
 
-### Target Roles
-{', '.join(CANDIDATE_PROFILE['target_roles'])}
-
-### Preferred Sectors (strongest fit)
-{', '.join(CANDIDATE_PROFILE['preferred_sectors'])}
-"""
+_CANDIDATE_CONTEXT = _build_candidate_context()
 
 
 def _build_scoring_prompt(job: Job) -> str:
