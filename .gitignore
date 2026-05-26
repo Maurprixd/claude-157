@@ -13,7 +13,5 @@ resumes/*.pdf
 # Old project folder
 job_scraper/
 
-# .job_cache.json is NOW TRACKED IN GIT
-# Both cloud and local sessions share the same job data through the repo.
-# Local session: git add shared/jobs.json && git push after each scrape
-# Cloud session: git pull to read latest jobs
+# Old cache location — data migrated to shared/jobs.json
+.job_cache.json
