@@ -12,6 +12,7 @@ Usage:
 """
 import os
 import pathlib
+import subprocess
 import sys
 import time
 
@@ -24,6 +25,47 @@ import click
 from profile.mauricio import CANDIDATE_PROFILE
 from scraper.models import Job, VerificationStatus
 from storage.cache import JobCache
+
+SHARED_DIR = pathlib.Path("shared")
+BRANCH = "claude/memory-form-clouds-access-bC5CO"
+
+
+def _git_sync(message: str = "sync: update job cache") -> bool:
+    """
+    Commit and push shared/jobs.json so the cloud session can read it.
+    Returns True if push succeeded, False if git is not available or push failed.
+    Both Claude sessions share data through this file in the git repo.
+    """
+    try:
+        SHARED_DIR.mkdir(exist_ok=True)
+        cache_file = SHARED_DIR / "jobs.json"
+        if not cache_file.exists():
+            return False
+
+        # Check if there's anything to commit
+        status = subprocess.run(
+            ["git", "status", "--porcelain", str(cache_file)],
+            capture_output=True, text=True
+        )
+        if not status.stdout.strip():
+            return True  # nothing changed, no need to push
+
+        subprocess.run(["git", "add", str(cache_file)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", message],
+            check=True, capture_output=True
+        )
+        subprocess.run(
+            ["git", "push", "-u", "origin", BRANCH],
+            check=True, capture_output=True
+        )
+        print(f"  [sync] Pushed shared/jobs.json → cloud session can now see these results")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"  [sync] Git push failed (working offline): {e}")
+        return False
+    except FileNotFoundError:
+        return False  # git not available
 
 
 def _print_job(rank: int, job: Job) -> None:
@@ -205,6 +247,10 @@ def scrape(sources: str, min_score: int, no_verify: bool, no_cache: bool):
         cache.set(job)
     cache.save()
 
+    # --- Sync to git so cloud session sees the same results ---
+    from datetime import datetime
+    _git_sync(f"sync: scrape {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} — {len(unique_jobs)} jobs, {len(qualified)} matched")
+
     # --- Report ---
     qualified_sorted = sorted(qualified, key=lambda j: j.match_score or 0, reverse=True)
     _print_report(qualified_sorted, source_list, min_score)
@@ -297,8 +343,22 @@ def apply(job_id: str):
     cache.set(job)
     cache.save()
 
+    # Sync so cloud session knows this job is now applied (won't recommend it again)
+    _git_sync(f"sync: applied {job.company} — {job.title}")
+
     print(f"\nDone! Check your Notion database:")
     print(f"  https://www.notion.so/{os.getenv('NOTION_DATABASE_ID', 'fcadfa0f55a54b6f99b5e2fadfdf1ad9')}")
+
+
+@cli.command()
+def sync():
+    """Push shared/jobs.json to git so the cloud session sees your latest results."""
+    print("\n[sync] Pushing job cache to shared repository...")
+    ok = _git_sync("sync: manual push from local session")
+    if ok:
+        print("[sync] Done — cloud session can now see all your scraped jobs.")
+    else:
+        print("[sync] Nothing to push (cache unchanged or git unavailable).")
 
 
 if __name__ == "__main__":

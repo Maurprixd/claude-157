@@ -7,7 +7,7 @@ divide responsibilities — and what YOU specifically need to do that the cloud 
 
 ---
 
-## The Two-Claude Setup
+## The Two-Claude Setup — Shared Memory via Git
 
 ```
 ┌─────────────────────────────────┐     ┌──────────────────────────────────┐
@@ -16,22 +16,31 @@ divide responsibilities — and what YOU specifically need to do that the cloud 
 │  • Builds & improves the code   │     │  • Actually RUNS the scraper     │
 │  • Manages git / GitHub         │     │  • Calls claude CLI for AI match │
 │  • Reviews Notion tracker       │     │  • Scrapes Indeed + LinkedIn     │
-│  • Generates resumes (PDF)      │     │    (these work here, blocked in  │
-│  • Plans job search strategy    │     │    cloud)                        │
-│  • Answers questions            │     │  • Runs bot.py (Telegram phone   │
-│                                 │     │    access)                       │
-│  CANNOT: run python locally,    │     │  • Generates cover letters       │
-│  use claude CLI, scrape Indeed  │     │    (streams via claude CLI)      │
-│  or LinkedIn (IP blocked)       │     │                                  │
+│  • Generates resumes (PDF)      │     │    (works here, blocked in cloud)│
+│  • Plans job search strategy    │     │  • Runs your existing Telegram   │
+│  • Reads shared/jobs.json to    │     │    bot + job hunter              │
+│    see all your found jobs      │     │  • Auto-pushes results to git    │
+│  • Answers questions            │     │    after every scrape            │
 └─────────────────────────────────┘     └──────────────────────────────────┘
                     │                                   │
                     └──────────── git push/pull ────────┘
                                        │
-                              profile/mauricio.py
-                              (shared source of truth)
+                         ┌─────────────────────────┐
+                         │   SHARED MEMORY (git)   │
+                         │                         │
+                         │  profile/mauricio.py    │  ← source of truth
+                         │  shared/jobs.json       │  ← all scraped jobs
+                         │  CLAUDE.md              │  ← session briefing
+                         └─────────────────────────┘
 ```
 
-**Rule:** Code changes come from the cloud, execution happens here.
+**How it works:**
+- Your local session scrapes → scores → saves to `shared/jobs.json` → auto git-pushes
+- Cloud session does `git pull` → reads `shared/jobs.json` → can generate resumes,
+  write cover letters, plan strategy, all based on YOUR real scraped data
+- Profile changes go either way — edit `profile/mauricio.py`, push, both sessions see it
+
+**Rule:** Code changes come from cloud. Job data comes from local. Both share through git.
 Always `git pull origin claude/memory-form-clouds-access-bC5CO` before running.
 
 ---
@@ -237,6 +246,51 @@ Branch: `claude/memory-form-clouds-access-bC5CO`
 ```bash
 git pull origin claude/memory-form-clouds-access-bC5CO   # get latest from cloud
 git push -u origin claude/memory-form-clouds-access-bC5CO  # send changes back
+```
+
+---
+
+## Connecting Your Existing Bot/Hunter to This Shared Memory
+
+If you already have a job hunter running on your PC, point it at `shared/jobs.json`
+and push to this repo — the cloud session will see everything it finds.
+
+**Option A — Write directly to shared/jobs.json**
+Your existing bot saves results in whatever format it uses.
+After each run, convert them to the Job format and write to `shared/jobs.json`:
+
+```python
+# In your existing bot, after scraping:
+import json, pathlib
+
+SHARED = pathlib.Path("/path/to/claude-157/shared/jobs.json")
+existing = json.loads(SHARED.read_text()) if SHARED.exists() else {}
+
+# Add your jobs (minimum required fields):
+existing["your_job_id"] = {
+    "job_id": "your_job_id",
+    "title": "Junior Industrial Designer",
+    "company": "Company Name",
+    "location": "Toronto, ON",
+    "url": "https://...",
+    "description": "Full job text...",
+    "source": "linkedin",        # or "jobbank", "indeed", "glassdoor"
+    "match_score": None,         # cloud session will score it
+    "scraped_at": "2026-05-26T10:00:00",
+}
+SHARED.write_text(json.dumps(existing, indent=2))
+
+# Then push:
+import subprocess
+subprocess.run(["git", "-C", "/path/to/claude-157", "add", "shared/jobs.json"])
+subprocess.run(["git", "-C", "/path/to/claude-157", "commit", "-m", "sync: new jobs from local bot"])
+subprocess.run(["git", "-C", "/path/to/claude-157", "push"])
+```
+
+**Option B — Just run python main.py sync**
+After any manual additions to the cache:
+```bash
+python main.py sync
 ```
 
 ---

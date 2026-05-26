@@ -1,8 +1,19 @@
+# Secrets — never commit
 .env
+
+# Python bytecode
 __pycache__/
 *.pyc
 *.pyo
-.job_cache.json
-outputs/
-resumes/
+
+# Generated PDF files (large, don't need in git)
+outputs/*.pdf
+resumes/*.pdf
+
+# Old project folder
 job_scraper/
+
+# .job_cache.json is NOW TRACKED IN GIT
+# Both cloud and local sessions share the same job data through the repo.
+# Local session: git add shared/jobs.json && git push after each scrape
+# Cloud session: git pull to read latest jobs

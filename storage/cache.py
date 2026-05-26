@@ -5,8 +5,10 @@ from typing import Optional
 
 from scraper.models import Job
 
-CACHE_FILE = pathlib.Path(".job_cache.json")
-CACHE_TTL_HOURS = 24
+# Shared cache — tracked in git so both cloud and local sessions see the same jobs.
+# Local session writes here after scraping, cloud session reads here to generate resumes etc.
+CACHE_FILE = pathlib.Path("shared/jobs.json")
+CACHE_TTL_HOURS = 72  # 3 days — longer TTL since we sync via git not just local disk
 
 
 class JobCache:
